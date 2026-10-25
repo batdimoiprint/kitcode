@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# kitcode: Launch Kitty in the kitcode layout preset (Workspace + FileTree)
+
+set -e
+
+TARGET_DIR="${1:-$(pwd)}"
+TARGET_DIR="$(cd "$TARGET_DIR" 2>/dev/null && pwd || echo "$TARGET_DIR")"
+export KITCODE_ROOT="$TARGET_DIR"
+
+exec kitty --session "$HOME/.config/kitty/kitcode.session" --directory "$TARGET_DIR"

@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""
+kitcode-preview: Multi-tab preview pane for kitcode IDE.
+Supports syntax-highlighted code, rendered Markdown, images, and live IPC sync.
+"""
+
+import argparse
+import sys
+from pathlib import Path
+
+# Add shared lib directory
+LIB_DIR = Path(__file__).resolve().parent.parent / "lib"
+sys.path.insert(0, str(LIB_DIR))
+
+from kitcode_core import KitcodePreviewApp, PreviewState
+from rich.console import Console
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Kitcode Preview Viewer")
+    parser.add_argument("--tab-id", default="default", help="Kitty Tab ID for IPC sync")
+    parser.add_argument("--dump", help="Dump rendered preview of file to stdout and exit")
+    parser.add_argument("files", nargs="*", help="Initial files to open")
+
+    args, remaining = parser.parse_known_args()
+
+    # Headless dump mode for verification/testing
+    if args.dump:
+        state = PreviewState()
+        dump_path = Path(args.dump)
+        tab = state.open_or_focus(dump_path)
+        kind, renderable = state.render_tab(tab)
+        console = Console()
+        console.print(renderable)
+        return
+
+    # Parse target line if given as +<num>
+    target_line = None
+    files = []
+    for arg in args.files + remaining:
+        if arg.startswith("+") and arg[1:].isdigit():
+            target_line = int(arg[1:])
+        else:
+            files.append(arg)
+
+    app = KitcodePreviewApp(initial_files=files, tab_id=args.tab_id, target_line=target_line)
+    app.run()
+
+
+if __name__ == "__main__":
+    main()

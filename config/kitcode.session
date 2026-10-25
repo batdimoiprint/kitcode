@@ -1,0 +1,10 @@
+layout splits
+
+# 1. Main Workspace (Left ~78% width) - plain shell
+launch --var role=workspace --title "Workspace"
+
+# 2. File Tree (Right ~22% width) - collapsible kitcode-tree
+launch --location=vsplit --bias=22 --var role=tree --title "FileTree" kitcode-tree
+
+# 3. Return focus to the workspace
+focus_matching_window var:role=workspace

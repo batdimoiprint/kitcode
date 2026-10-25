@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""
+kitcode-toggle: Toggle tree or preview panes in the active Kitty tab.
+Usage: kitcode-toggle [tree|preview]
+"""
+
+import os
+import sys
+from pathlib import Path
+
+# Add shared lib directory
+LIB_DIR = Path(__file__).resolve().parent.parent / "lib"
+sys.path.insert(0, str(LIB_DIR))
+
+from kitcode_core import KittyController
+
+
+def main():
+    role = sys.argv[1].lower() if len(sys.argv) > 1 else "tree"
+    if role not in ("tree", "preview"):
+        role = "tree"
+
+    root_dir = Path(os.environ.get("KITCODE_ROOT", Path.cwd()))
+    controller = KittyController()
+    controller.toggle_pane(role, root_dir=root_dir)
+
+
+if __name__ == "__main__":
+    main()
