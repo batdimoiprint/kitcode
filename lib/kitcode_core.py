@@ -36,6 +36,68 @@ from textual.widgets.tree import TreeNode
 
 
 # ==============================================================================
+# Kitty Theme Loader (HyprTheme / Catppuccin fallback)
+# ==============================================================================
+
+def load_kitty_theme() -> dict[str, str]:
+    """Read ~/.config/kitty/theme.conf so UI matches active HyprTheme palette."""
+    palette = {
+        "bg": "#1e1e2e",
+        "fg": "#cdd6f4",
+        "surface": "#181825",
+        "muted": "#6c7086",
+        "accent": "#89b4fa",
+        "accent_fg": "#11111b",
+        "green": "#a6e3a1",
+        "yellow": "#f9e2af",
+        "red": "#f38ba8",
+        "cyan": "#89dceb",
+        "mauve": "#cba6f7",
+    }
+    theme_path = Path.home() / ".config" / "kitty" / "theme.conf"
+    if not theme_path.exists():
+        return palette
+
+    raw: dict[str, str] = {}
+    try:
+        for line in theme_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split()
+            if len(parts) >= 2 and parts[1].startswith("#"):
+                raw[parts[0]] = parts[1]
+    except Exception:
+        return palette
+
+    if "background" in raw:
+        palette["bg"] = raw["background"]
+    if "foreground" in raw:
+        palette["fg"] = raw["foreground"]
+    if "color0" in raw:
+        palette["surface"] = raw["color0"]
+    if "color8" in raw:
+        palette["muted"] = raw["color8"]
+    if "active_tab_background" in raw:
+        palette["accent"] = raw["active_tab_background"]
+    elif "color2" in raw:
+        palette["accent"] = raw["color2"]
+    if "active_tab_foreground" in raw:
+        palette["accent_fg"] = raw["active_tab_foreground"]
+    if "color2" in raw:
+        palette["green"] = raw["color2"]
+    if "color3" in raw:
+        palette["yellow"] = raw["color3"]
+    if "color1" in raw:
+        palette["red"] = raw["color1"]
+    if "color6" in raw:
+        palette["cyan"] = raw["color6"]
+    if "color5" in raw:
+        palette["mauve"] = raw["color5"]
+    return palette
+
+
+# ==============================================================================
 # Git Status & Filesystem
 # ==============================================================================
 
@@ -405,6 +467,8 @@ class PreviewState:
                 str(tab.path),
                 line_numbers=True,
                 theme="monokai",
+                background_color="default",
+                word_wrap=True,
                 highlight_lines=highlight,
             )
             return "syntax", syntax
@@ -469,7 +533,7 @@ class KittyController:
         return Path(f"/tmp/kitcode-preview-{tab_id}.json")
 
     def open_in_preview(
-        self, file_path: Path, line: int | None = None, root_dir: Path | None = None
+        self, file_path: Path, line: int | None = None, root_dir: Path | None = None, take_focus: bool = False
     ) -> None:
         """Open or update file in dedicated preview pane without touching workspace."""
         ls_info = self.parse_windows(self.get_windows())
@@ -490,24 +554,32 @@ class KittyController:
 
         has_preview = "preview" in ls_info["roles"]
         if not has_preview:
-            # Spawn preview split next to workspace
+            # Spawn preview split next to workspace in center pane
             cwd = str(root_dir.resolve()) if root_dir else str(file_path.parent)
+            next_to = "var:role=workspace" if "workspace" in ls_info["roles"] else None
             args = [
                 "launch",
                 "--location=vsplit",
-                "--bias=45",
+                "--bias=50",
                 "--var=role=preview",
                 "--title=Preview",
                 f"--cwd={cwd}",
+            ]
+            if next_to:
+                args.append(f"--next-to={next_to}")
+            if not take_focus:
+                args.append("--keep-focus")
+            args.extend([
                 "kitcode-preview",
                 f"--tab-id={tab_id}",
                 str(file_path.resolve()),
-            ]
+            ])
             if line:
                 args.append(f"+{line}")
             self.run_kitty(*args)
         else:
-            self.run_kitty("focus-window", "--match", "var:role=preview")
+            if take_focus:
+                self.run_kitty("focus-window", "--match", "var:role=preview")
 
     def open_in_editor(
         self, file_path: Path, line: int | None = None, root_dir: Path | None = None
@@ -526,7 +598,11 @@ class KittyController:
             )
             self.run_kitty("focus-window", "--match", "var:role=editor")
         else:
+            # If preview is already open, close preview so editor takes center pane instead of cramping layout
+            if "preview" in ls_info["roles"]:
+                self.run_kitty("close-window", "--match", "var:role=preview")
             cwd = str(root_dir.resolve()) if root_dir else str(file_path.parent)
+            next_to = "var:role=workspace" if "workspace" in ls_info["roles"] else None
             cmd = [
                 "launch",
                 "--location=vsplit",
@@ -534,8 +610,10 @@ class KittyController:
                 "--var=role=editor",
                 "--title=Editor",
                 f"--cwd={cwd}",
-                editor,
             ]
+            if next_to:
+                cmd.append(f"--next-to={next_to}")
+            cmd.append(editor)
             if "nvim" in editor:
                 cmd.extend(["--listen", str(editor_sock)])
             if line:
@@ -552,25 +630,33 @@ class KittyController:
         else:
             cwd = str(root_dir.resolve()) if root_dir else "."
             if role == "tree":
-                self.run_kitty(
+                next_to = "var:role=preview" if "preview" in ls_info["roles"] else ("var:role=workspace" if "workspace" in ls_info["roles"] else None)
+                args = [
                     "launch",
                     "--location=vsplit",
                     "--bias=22",
                     "--var=role=tree",
                     "--title=FileTree",
                     f"--cwd={cwd}",
-                    "kitcode-tree",
-                )
+                ]
+                if next_to:
+                    args.append(f"--next-to={next_to}")
+                args.append("kitcode-tree")
+                self.run_kitty(*args)
             elif role == "preview":
-                self.run_kitty(
+                next_to = "var:role=workspace" if "workspace" in ls_info["roles"] else None
+                args = [
                     "launch",
                     "--location=vsplit",
-                    "--bias=45",
+                    "--bias=50",
                     "--var=role=preview",
                     "--title=Preview",
                     f"--cwd={cwd}",
-                    "kitcode-preview",
-                )
+                ]
+                if next_to:
+                    args.append(f"--next-to={next_to}")
+                args.append("kitcode-preview")
+                self.run_kitty(*args)
 
 
 # ==============================================================================
@@ -582,7 +668,7 @@ class KitcodePreviewApp(App):
 
     CSS = """
     Screen {
-        background: #1e1e2e;
+        background: ansi_default;
         color: #cdd6f4;
         overflow: hidden;
     }
@@ -590,7 +676,7 @@ class KitcodePreviewApp(App):
     #tab-bar {
         dock: top;
         height: 1;
-        background: #181825;
+        background: #162319;
         color: #6c7086;
         padding: 0 1;
     }
@@ -598,16 +684,17 @@ class KitcodePreviewApp(App):
     #preview-body {
         width: 100%;
         height: 1fr;
-        background: #1e1e2e;
+        background: ansi_default;
         color: #cdd6f4;
         overflow-y: scroll;
+        overflow-x: auto;
         padding: 0 1;
     }
 
     #status-bar {
         dock: bottom;
         height: 1;
-        background: #181825;
+        background: #162319;
         color: #6c7086;
         padding: 0 1;
     }
@@ -642,6 +729,7 @@ class KitcodePreviewApp(App):
         self.tab_id = tab_id
         self.preview_state = PreviewState()
         self.last_ipc_ts = 0.0
+        self.kitty_theme = load_kitty_theme()
 
         if initial_files:
             for idx, f in enumerate(initial_files):
@@ -654,11 +742,14 @@ class KitcodePreviewApp(App):
         yield Label("", id="tab-bar")
         yield Static("", id="preview-body")
         yield Label(
-            Text("[1-9 / [ / ]] tab  [e] edit  [m] md raw/render  [i] image  [w] close  [q] quit"),
+            Text("1-9/[/] tab  e nvim  m md  i img  w close tab  q close pane", style=self.kitty_theme["muted"]),
             id="status-bar",
         )
 
     def on_mount(self) -> None:
+        # Apply dynamic theme colors to header/status bars
+        self.query_one("#tab-bar", Label).styles.background = self.kitty_theme["surface"]
+        self.query_one("#status-bar", Label).styles.background = self.kitty_theme["surface"]
         self.update_view()
         self.set_interval(0.15, self._check_ipc)
 
@@ -682,21 +773,21 @@ class KitcodePreviewApp(App):
         tab_bar = self.query_one("#tab-bar", Label)
         body = self.query_one("#preview-body", Static)
 
-        # Render tabs
+        # Render tabs with theme-aware styling
         tab_texts = []
         for idx, tab in enumerate(self.preview_state.tabs):
             num = idx + 1
             name = tab.path.name
             if idx == self.preview_state.active_index:
-                tab_texts.append(Text(f" {num}: {name} ", style="bold #1e1e2e on #89b4fa"))
+                tab_texts.append(Text(f" {num}: {name} ", style=f"bold {self.kitty_theme['accent_fg']} on {self.kitty_theme['accent']}"))
             else:
-                tab_texts.append(Text(f" {num}: {name} ", style="#a6adc8"))
+                tab_texts.append(Text(f" {num}: {name} ", style=f"{self.kitty_theme['fg']}"))
 
         if tab_texts:
             res = Text(" ").join(tab_texts)
             tab_bar.update(res)
         else:
-            tab_bar.update(Text(" No open files ", style="#6c7086"))
+            tab_bar.update(Text(" No open files ", style=self.kitty_theme["muted"]))
 
         # Render active tab
         active = self.preview_state.active_tab
@@ -704,10 +795,9 @@ class KitcodePreviewApp(App):
             kind, renderable = self.preview_state.render_tab(active)
             body.update(renderable)
             if active.line and kind == "syntax":
-                # Scroll near target line
                 body.scroll_to(y=max(0, active.line - 5), animate=False)
         else:
-            body.update(Text("No buffer open. Select a file in kitcode-tree.", style="#6c7086"))
+            body.update(Text("No buffer open. Select a file in kitcode-tree.", style=self.kitty_theme["muted"]))
 
     def action_close_tab(self) -> None:
         self.preview_state.close_active()
@@ -859,6 +949,11 @@ ICON_MAP = {
 class FileTree(DirectoryTree):
     """Custom DirectoryTree with Material/Nerd Font icons and Git status badges."""
 
+    BINDINGS = [
+        Binding("j", "cursor_down", "Down", show=False),
+        Binding("k", "cursor_up", "Up", show=False),
+    ]
+
     def __init__(self, path: str | Path, git_state_getter: Callable[[], GitRepoState], show_hidden: bool = False, **kwargs):
         super().__init__(path, **kwargs)
         self.git_state_getter = git_state_getter
@@ -919,7 +1014,7 @@ class KitcodeTreeApp(App):
 
     CSS = """
     Screen {
-        background: #1e1e2e;
+        background: ansi_default;
         color: #cdd6f4;
         overflow: hidden;
     }
@@ -927,7 +1022,7 @@ class KitcodeTreeApp(App):
     #header-bar {
         dock: top;
         height: 1;
-        background: #181825;
+        background: #162319;
         color: #89b4fa;
         text-style: bold;
         padding: 0 1;
@@ -936,12 +1031,12 @@ class KitcodeTreeApp(App):
     #search-box {
         dock: top;
         height: auto;
-        background: #181825;
+        background: #162319;
         padding: 0 1;
     }
 
     #search-input {
-        background: #313244;
+        background: #0d130e;
         color: #cdd6f4;
         border: none;
         height: 1;
@@ -949,13 +1044,13 @@ class KitcodeTreeApp(App):
 
     #search-results {
         max-height: 8;
-        background: #181825;
+        background: #162319;
         color: #cdd6f4;
         border: none;
     }
 
     #tree-view {
-        background: #1e1e2e;
+        background: ansi_default;
         color: #cdd6f4;
         scrollbar-gutter: stable;
         border: none;
@@ -968,7 +1063,7 @@ class KitcodeTreeApp(App):
     #status-bar {
         dock: bottom;
         height: 1;
-        background: #181825;
+        background: #162319;
         color: #6c7086;
         padding: 0 1;
     }
@@ -981,7 +1076,6 @@ class KitcodeTreeApp(App):
         Binding("r", "refresh_tree", "Refresh", show=True),
         Binding("e", "edit_file", "Edit ($EDITOR)", show=True),
         Binding("b", "preview_file", "Preview", show=True),
-        Binding("enter", "preview_file", "Preview", show=True),
         Binding("slash", "open_fuzzy_search", "Find File (/)", show=True),
         Binding("g", "open_ripgrep_search", "Ripgrep (g)", show=True),
         Binding("escape", "close_search", "Close Search", show=False),
@@ -994,6 +1088,7 @@ class KitcodeTreeApp(App):
         self.kitty_controller = KittyController()
         self.git_state = get_git_status(self.root_dir)
         self.fingerprint = compute_tree_fingerprint(self.root_dir)
+        self.kitty_theme = load_kitty_theme()
 
         self.search_mode: str | None = None  # "fuzzy" or "ripgrep"
         self.search_matches: list[Any] = []
@@ -1020,9 +1115,16 @@ class KitcodeTreeApp(App):
             yield results
 
         yield self.file_tree
-        yield Label(Text("[Click/Enter] preview  [/] find  [g] grep  [e] edit  [r] reload"), id="status-bar")
+        yield Label(Text("⏎ view  / find  g grep  e nvim  . dot", style=self.kitty_theme["muted"]), id="status-bar")
 
     def on_mount(self) -> None:
+        self.file_tree.focus()
+        header = self.query_one("#header-bar", Label)
+        status = self.query_one("#status-bar", Label)
+        header.styles.background = self.kitty_theme["surface"]
+        header.styles.color = self.kitty_theme["accent"]
+        status.styles.background = self.kitty_theme["surface"]
+        status.styles.color = self.kitty_theme["muted"]
         self.set_interval(2.0, self._check_fingerprint)
 
     def _check_fingerprint(self) -> None:
