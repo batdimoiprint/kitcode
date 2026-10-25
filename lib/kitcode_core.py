@@ -29,6 +29,7 @@ from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
+from textual.screen import ModalScreen
 from textual.widgets import DirectoryTree, Input, Label, OptionList, Static
 from textual.widgets._directory_tree import DirEntry
 from textual.widgets.option_list import Option
@@ -660,6 +661,108 @@ class KittyController:
 
 
 # ==============================================================================
+# Modal: HelpModal (Keyboard Shortcuts Cheatsheet)
+# ==============================================================================
+
+class HelpModal(ModalScreen):
+    """Modal dialog displaying all kitcode keyboard shortcuts."""
+
+    CSS = """
+    HelpModal {
+        align: center middle;
+        background: rgba(0, 0, 0, 0.75);
+    }
+
+    #help-box {
+        width: 78;
+        height: auto;
+        max-height: 90%;
+        background: #162319;
+        border: solid #22c55e;
+        padding: 1 2;
+        color: #cdd6f4;
+        overflow-y: scroll;
+    }
+
+    #help-title {
+        text-style: bold;
+        color: #22c55e;
+        text-align: center;
+        margin-bottom: 1;
+    }
+
+    .help-section {
+        margin-top: 1;
+        text-style: bold;
+        color: #89b4fa;
+    }
+
+    .help-row {
+        height: 1;
+        margin-left: 2;
+        color: #cdd6f4;
+    }
+
+    #help-footer {
+        margin-top: 1;
+        text-align: center;
+        color: #6c7086;
+    }
+    """
+
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close", show=False),
+        Binding("q", "dismiss", "Close", show=False),
+        Binding("question_mark", "dismiss", "Close", show=False),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Container(id="help-box"):
+            yield Label("󰘳  KITCODE SHORTCUTS CHEATSHEET", id="help-title")
+
+            yield Label("🖥️  GLOBAL KITTY SHORTCUTS", classes="help-section")
+            yield Label("  Alt+B / Ctrl+Shift+B   Toggle FileTree sidebar", classes="help-row")
+            yield Label("  Alt+P                  Toggle Preview pane", classes="help-row")
+            yield Label("  Alt+H / J / K / L      Switch window focus (left/down/up/right)", classes="help-row")
+            yield Label("  Alt+Shift+H/J/K/L      Resize window (narrower/wider/taller)", classes="help-row")
+            yield Label("  Alt+Z                  Zoom / Maximize active pane", classes="help-row")
+            yield Label("  Alt+W                  Close active window", classes="help-row")
+
+            yield Label("📂  FILETREE SIDEBAR", classes="help-section")
+            yield Label("  Enter / Click          Preview file in center pane / Expand folder", classes="help-row")
+            yield Label("  ↑ / ↓  or  j / k       Navigate files in tree", classes="help-row")
+            yield Label("  /                      Fuzzy find file by name", classes="help-row")
+            yield Label("  g                      Ripgrep content search (jump to line)", classes="help-row")
+            yield Label("  e                      Open in Neovim ($EDITOR in center split)", classes="help-row")
+            yield Label("  h  or  .               Toggle hidden dotfiles", classes="help-row")
+            yield Label("  r                      Refresh tree & Git status badges", classes="help-row")
+            yield Label("  ?                      Toggle this Help cheatsheet", classes="help-row")
+            yield Label("  q                      Close FileTree", classes="help-row")
+
+            yield Label("📄  PREVIEW PANE", classes="help-section")
+            yield Label("  1 .. 9                 Switch to buffer tab 1-9", classes="help-row")
+            yield Label("  [  /  ]                Previous / Next tab", classes="help-row")
+            yield Label("  m                      Toggle formatted Markdown / raw code", classes="help-row")
+            yield Label("  i                      Preview image (kitty icat)", classes="help-row")
+            yield Label("  e                      Open current tab in Neovim ($EDITOR)", classes="help-row")
+            yield Label("  w                      Close active buffer tab", classes="help-row")
+            yield Label("  ?                      Toggle this Help cheatsheet", classes="help-row")
+            yield Label("  q                      Close preview pane", classes="help-row")
+
+            yield Label("Press [Escape], [?], or [q] to close", id="help-footer")
+
+    def on_mount(self) -> None:
+        theme = load_kitty_theme()
+        box = self.query_one("#help-box", Container)
+        box.styles.background = theme["surface"]
+        box.styles.border = ("solid", theme["accent"])
+        self.query_one("#help-title", Label).styles.color = theme["accent"]
+        self.query_one("#help-footer", Label).styles.color = theme["muted"]
+        for sec in self.query(".help-section"):
+            sec.styles.color = theme["cyan"]
+
+
+# ==============================================================================
 # Textual App: KitcodePreviewApp
 # ==============================================================================
 
@@ -706,6 +809,7 @@ class KitcodePreviewApp(App):
         Binding("m", "toggle_markdown", "Toggle Markdown", show=True),
         Binding("e", "edit_in_editor", "Edit", show=True),
         Binding("i", "show_image", "Image", show=True),
+        Binding("question_mark", "toggle_help", "Help (?)", show=True),
         Binding("bracket_left", "prev_tab", "Prev Tab", show=False),
         Binding("bracket_right", "next_tab", "Next Tab", show=False),
         Binding("1", "tab_1", "Tab 1", show=False),
@@ -741,10 +845,20 @@ class KitcodePreviewApp(App):
     def compose(self) -> ComposeResult:
         yield Label("", id="tab-bar")
         yield Static("", id="preview-body")
-        yield Label(
-            Text("1-9/[/] tab  e nvim  m md  i img  w close tab  q close pane", style=self.kitty_theme["muted"]),
-            id="status-bar",
-        )
+        yield Label(self._build_toolbar_text(), id="status-bar")
+
+    def _build_toolbar_text(self) -> Text:
+        t = Text()
+        t.append("[? Help] ", style=f"bold {self.kitty_theme['accent']}")
+        t.append("[1-9 Tab] ", style=f"{self.kitty_theme['fg']}")
+        t.append("[[ / ]] ", style=f"{self.kitty_theme['muted']}")
+        t.append("[m Md] ", style=f"{self.kitty_theme['fg']}")
+        t.append("[e Edit] ", style=f"{self.kitty_theme['green']}")
+        t.append("[w Close] ", style=f"{self.kitty_theme['muted']}")
+        return t
+
+    def action_toggle_help(self) -> None:
+        self.app.push_screen(HelpModal())
 
     def on_mount(self) -> None:
         # Apply dynamic theme colors to header/status bars
@@ -1078,6 +1192,7 @@ class KitcodeTreeApp(App):
         Binding("b", "preview_file", "Preview", show=True),
         Binding("slash", "open_fuzzy_search", "Find File (/)", show=True),
         Binding("g", "open_ripgrep_search", "Ripgrep (g)", show=True),
+        Binding("question_mark", "toggle_help", "Help (?)", show=True),
         Binding("escape", "close_search", "Close Search", show=False),
     ]
 
@@ -1115,7 +1230,19 @@ class KitcodeTreeApp(App):
             yield results
 
         yield self.file_tree
-        yield Label(Text("⏎ view  / find  g grep  e nvim  . dot", style=self.kitty_theme["muted"]), id="status-bar")
+        yield Label(self._build_toolbar_text(), id="status-bar")
+
+    def _build_toolbar_text(self) -> Text:
+        t = Text()
+        t.append("[? Help] ", style=f"bold {self.kitty_theme['accent']}")
+        t.append("[/ Find] ", style=f"{self.kitty_theme['fg']}")
+        t.append("[g Grep] ", style=f"{self.kitty_theme['fg']}")
+        t.append("[e Edit] ", style=f"{self.kitty_theme['green']}")
+        t.append("[. Dot] ", style=f"{self.kitty_theme['muted']}")
+        return t
+
+    def action_toggle_help(self) -> None:
+        self.app.push_screen(HelpModal())
 
     def on_mount(self) -> None:
         self.file_tree.focus()

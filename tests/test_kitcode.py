@@ -332,6 +332,10 @@ class TestTextualApps(unittest.IsolatedAsyncioTestCase):
             await pilot.press("m")
             self.assertTrue(app.preview_state.active_tab.raw_markdown)
 
+            # Test help modal opening and closing
+            await pilot.press("question_mark")
+            await pilot.press("escape")
+
             # Close tab with 'w'
             await pilot.press("w")
             self.assertEqual(len(app.preview_state.tabs), 1)
@@ -351,6 +355,10 @@ class TestTextualApps(unittest.IsolatedAsyncioTestCase):
             # Press Escape to close search
             await pilot.press("escape")
             self.assertFalse(search_input.display)
+
+            # Press '?' to open help modal and escape to close
+            await pilot.press("question_mark")
+            await pilot.press("escape")
 
 
 class TestCliAndBinaries(unittest.TestCase):

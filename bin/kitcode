@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# kitcode: Launch Kitty in the kitcode layout preset (Workspace + FileTree)
+# kitcode: Launch or transform into the Kitcode IDE layout
 
 set -e
 
@@ -7,4 +7,41 @@ TARGET_DIR="${1:-$(pwd)}"
 TARGET_DIR="$(cd "$TARGET_DIR" 2>/dev/null && pwd || echo "$TARGET_DIR")"
 export KITCODE_ROOT="$TARGET_DIR"
 
+# If already running inside an existing Kitty window, open inside this window
+if [ -n "$KITTY_WINDOW_ID" ]; then
+    SOCKET="${KITTY_LISTEN_ON:-}"
+    if [ -z "$SOCKET" ] && [ -n "$KITTY_PID" ]; then
+        SOCKET="unix:/tmp/kitty-socket-$KITTY_PID"
+    fi
+    if [ -z "$SOCKET" ]; then
+        SOCKET="unix:/tmp/kitty-socket"
+    fi
+
+    # Mark current window as the workspace
+    kitty @ --to "$SOCKET" set-user-vars --match id:"$KITTY_WINDOW_ID" role=workspace 2>/dev/null || true
+    kitty @ --to "$SOCKET" set-window-title --match id:"$KITTY_WINDOW_ID" "Workspace" 2>/dev/null || true
+    kitty @ --to "$SOCKET" goto-layout --match id:"$KITTY_WINDOW_ID" splits 2>/dev/null || true
+
+    # Check if a tree pane already exists in this tab
+    has_tree=$(kitty @ --to "$SOCKET" ls 2>/dev/null | jq -r --arg wid "$KITTY_WINDOW_ID" '
+        [.[].tabs[] | select(.windows[] | .id == ($wid | tonumber)) | .windows[] | select(.user_vars.role == "tree") | .id] | first // empty
+    ' 2>/dev/null || true)
+
+    if [ -n "$has_tree" ]; then
+        kitty @ --to "$SOCKET" focus-window --match id:"$has_tree" 2>/dev/null || true
+    else
+        kitty @ --to "$SOCKET" launch \
+            --location=vsplit \
+            --bias=22 \
+            --next-to=id:"$KITTY_WINDOW_ID" \
+            --var role=tree \
+            --title FileTree \
+            --cwd "$TARGET_DIR" \
+            kitcode-tree "$TARGET_DIR" 2>/dev/null || true
+        kitty @ --to "$SOCKET" focus-window --match id:"$KITTY_WINDOW_ID" 2>/dev/null || true
+    fi
+    exit 0
+fi
+
+# If outside Kitty, launch a new Kitty window with kitcode session preset
 exec kitty --session "$HOME/.config/kitty/kitcode.session" --directory "$TARGET_DIR"
